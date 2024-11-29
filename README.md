@@ -52,3 +52,17 @@ go build -o server.exe main.go
 ```shell
 .\server.exe
 ```
+
+### Docker
+
+1. Build the image
+
+```shell
+docker build -t tempfile . 
+```
+
+2. Run the image
+
+```shell
+docker run --name tempfile -p 3001:3001 --env-file .env -e DB_HOST=host.docker.internal tempfile
+```
