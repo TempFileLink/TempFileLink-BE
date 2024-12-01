@@ -17,6 +17,11 @@ func main() {
 	api := app.Group("/api")
 	apiV1 := api.Group("/v1")
 
+	// health check
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.SendString("OK!")
+	})
+
 	// Database
 	database.ConnectDB()
 	database.Migrate()
