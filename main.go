@@ -12,6 +12,10 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 )
 
+func init() {
+	database.ConnectDB()
+}
+
 func main() {
 	app := fiber.New()
 	api := app.Group("/api")
@@ -21,10 +25,6 @@ func main() {
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("OK!")
 	})
-
-	// Database
-	database.ConnectDB()
-	database.Migrate()
 
 	// Middlewares
 	app.Use(logger.New())
