@@ -25,6 +25,7 @@ func Register(c *fiber.Ctx) error {
 		return err
 	}
 
+	// Check if the user exists
 	var existingUser models.User
 	database.DB.Where("email = ?", userDto.Email).First(&existingUser)
 
@@ -32,12 +33,14 @@ func Register(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "An account already exists with this email address.")
 	}
 
+	// Hash the password
 	hash, hashErr := bcrypt.GenerateFromPassword([]byte(userDto.Password), bcrypt.DefaultCost)
 
 	if hashErr != nil {
 		return err
 	}
 
+	// Create the user
 	user := models.User{
 		Email:    userDto.Email,
 		Password: string(hash),
