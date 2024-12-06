@@ -13,4 +13,5 @@ func setupUserRoutes(api fiber.Router) {
 	userApi.Get("/", handlers.UserMessage)
 	userApi.Post("/register", middlewares.BodyParser(dto.User{}), handlers.Register)
 	userApi.Post("/login", middlewares.BodyParser(dto.User{}), handlers.Login)
+	userApi.Get("/profile", middlewares.JWTWare, handlers.Profile)
 }

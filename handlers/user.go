@@ -87,3 +87,18 @@ func Login(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"token": t})
 }
+
+func Profile(c *fiber.Ctx) error {
+	jwtUser := c.Locals("user").(*jwt.Token)
+	claims := jwtUser.Claims.(jwt.MapClaims)
+	email := claims["email"].(string)
+
+	var user models.User
+	database.DB.Where("email = ?", email).First(&user)
+
+	if user == (models.User{}) {
+		return fiber.NewError(fiber.StatusBadRequest, "Account is invalid")
+	}
+
+	return c.JSON(user)
+}
