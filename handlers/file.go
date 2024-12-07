@@ -158,6 +158,16 @@ func UploadFile(c *fiber.Ctx) error {
 	}
 
 	/* Handle buat bikin password ke DB */
+	/*
+		Nama file bisa diambil dari "file.Filename"
+
+		Ide awalnya (boleh diganti kalau ada yang lebih cocok)
+		DB isinya:
+		fileID -> formatnya <USER-ID>/<FILENAME>
+		isPassword true/false -> tergantung pake atau enggak
+		password -> hashed password (bisa nyontek dari user.go)
+	*/
+	// Isi disini (kalau udah hapus aja)
 
 	// Return berhasil
 	return c.SendString("File uploaded")
@@ -179,7 +189,12 @@ func GetFile(c *fiber.Ctx) error {
 	s3Client := s3.New(sess)
 
 	/* Handle buat cek password, klo benar baru proses */
-	// Isi disini
+	/*
+		Ide awalnya (boleh diganti kalau ada yang lebih cocok)
+		Cek ke DB dari <USER-ID>/<fileID>
+		<fileID> sama aja dengan <FILENAME>
+	*/
+	// Isi disini (kalau udah hapus aja)
 
 	// Untuk presign + redirect URL
 	urlStr, err := presignUrl(s3Client, prefix, fileName)

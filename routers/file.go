@@ -8,10 +8,10 @@ import (
 
 /*
 Di DB isinya
-fileId 			| isPassword	| password
-Nama file asli	| true/false	| hashed
-contoh:			|				|
-<USER-ID>/nama	|				|
+fileId 				| isPassword	| password
+Nama file asli		| true/false	| hashed
+contoh:				|				|
+<USER-ID>/<FILE>	|				|
 
 Nanti redirect langsung aja ke signedURL filename
 */
