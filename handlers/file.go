@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/TempFileLink/TempFileLink-BE/config"
+	"github.com/TempFileLink/TempFileLink-BE/database"
+	"github.com/TempFileLink/TempFileLink-BE/models"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -13,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 /*
@@ -36,10 +39,10 @@ func newSession() (*session.Session, error) {
 	return sess, nil
 }
 
-func listObjects(client *s3.S3, bucketName string, prefix string) (*s3.ListObjectsV2Output, error) {
+func listObjects(client *s3.S3, prefix string) (*s3.ListObjectsV2Output, error) {
 	res, err := client.ListObjectsV2(&s3.ListObjectsV2Input{
-		Bucket: aws.String(bucketName),
-		Prefix: &prefix,
+		Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
+		Prefix: aws.String(prefix),
 	})
 	if err != nil {
 		return nil, err
@@ -48,7 +51,7 @@ func listObjects(client *s3.S3, bucketName string, prefix string) (*s3.ListObjec
 	return res, nil
 }
 
-func uploadFile(uploader *s3manager.Uploader, bucketName string, prefix string, fileHeader *multipart.FileHeader) error {
+func uploadObject(uploader *s3manager.Uploader, prefix string, fileHeader *multipart.FileHeader) error {
 	file, err := fileHeader.Open()
 	if err != nil {
 		return err
@@ -58,7 +61,7 @@ func uploadFile(uploader *s3manager.Uploader, bucketName string, prefix string, 
 	filePath := fmt.Sprintf("%s%s", prefix, fileHeader.Filename)
 
 	_, err = uploader.Upload(&s3manager.UploadInput{
-		Bucket: aws.String(bucketName),
+		Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
 		Key:    aws.String(filePath),
 		Body:   file,
 	})
@@ -66,11 +69,11 @@ func uploadFile(uploader *s3manager.Uploader, bucketName string, prefix string, 
 	return err
 }
 
-func presignUrl(client *s3.S3, bucketName string, prefix string, name string) (string, error) {
+func presignUrl(client *s3.S3, prefix string, name string) (string, error) {
 	fileName := fmt.Sprintf("%s%s", prefix, name)
 
 	req, _ := client.GetObjectRequest(&s3.GetObjectInput{
-		Bucket: aws.String(bucketName),
+		Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
 		Key:    aws.String(fileName),
 	})
 
@@ -82,75 +85,108 @@ func presignUrl(client *s3.S3, bucketName string, prefix string, name string) (s
 	return urlStr, nil
 }
 
+func getUserInfo(jwtUser *jwt.Token) string {
+	claims := jwtUser.Claims.(jwt.MapClaims)
+	email := claims["email"].(string)
+
+	var user models.User
+	database.DB.Where("email = ?", email).First(&user)
+
+	// if user == (models.User{}) {
+	// 	return fiber.NewError(fiber.StatusBadRequest, "Account is invalid")
+	// }
+
+	return fmt.Sprintf("%s/", user.ID.String())
+}
+
 /*
 For Handling API call in routers/file.go
 */
 
+func FileMessage(c *fiber.Ctx) error {
+	return c.SendString("File")
+}
+
 func GetListFile(c *fiber.Ctx) error {
+	/*
+		contoh return format
+		{
+			"data": [
+				{
+					"name": "820d074d-a33c-4b03-b165-eb9c559bc621/file2.txt",
+					"size": 49
+				}
+			]
+		}
+	*/
+	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
+
 	sess, err := newSession()
 	if err != nil {
-		return c.SendString("Failed to create AWS session")
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	bucketName := "my-unique-bucket-kowan"
-	prefix := "user1/" // Tinggal cara dapet prefix
 	s3Client := s3.New(sess)
-
-	objects, err := listObjects(s3Client, bucketName, prefix)
+	objects, err := listObjects(s3Client, prefix)
 	if err != nil {
-		return c.SendString("Failed")
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
+	// Change to Slice
+	var response []fiber.Map
 	for _, object := range objects.Contents {
-		fmt.Printf("Found object: %s, size: %d\n", *object.Key, *object.Size)
+		response = append(response, fiber.Map{"name": *object.Key, "size": *object.Size})
 	}
 
-	return c.SendString("S3 session & client initialized")
+	return c.JSON(fiber.Map{"data": response})
 }
 
 func UploadFile(c *fiber.Ctx) error {
+	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
+
 	sess, err := newSession()
+	if err != nil {
+		return c.SendStatus(fiber.StatusInternalServerError)
+	}
+
 	uploader := s3manager.NewUploader(sess)
-
-	bucketName := "my-unique-bucket-kowan"
-	prefix := "user1/" // Tinggal cara dapet prefix
-
 	file, err := c.FormFile("file")
+
+	err = uploadObject(uploader, prefix, file)
 	if err != nil {
-		return err
+		return c.Status(fiber.StatusBadRequest).SendString("Upload file failed")
 	}
 
-	err = uploadFile(uploader, bucketName, prefix, file)
-	if err != nil {
-		c.SendString("Failed File")
-	}
+	/* Handle buat bikin password ke DB */
 
-	return c.SendString("Upload File")
+	// Return berhasil
+	return c.SendString("File uploaded")
 }
 
 func GetFile(c *fiber.Ctx) error {
+	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
+
 	sess, err := newSession()
 	if err != nil {
-		return c.SendString("Failed to create AWS session")
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	fileId := c.Params("fileId")
-	if fileId == "" {
-		return c.SendString("Error name")
+	fileName := c.Params("fileId")
+	if fileName == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("File ID is missing")
 	}
 
-	// Handle mapping fileId ke fileName
-	fileName := fileId
-
-	bucketName := "my-unique-bucket-kowan"
-	prefix := "user1/" // Tinggal cara dapet prefix
 	s3Client := s3.New(sess)
 
-	urlStr, err := presignUrl(s3Client, bucketName, prefix, fileName)
+	/* Handle buat cek password, klo benar baru proses */
+	// Isi disini
+
+	// Untuk presign + redirect URL
+	urlStr, err := presignUrl(s3Client, prefix, fileName)
 	if err != nil {
-		fmt.Printf("Couldn't presign url: %v", err)
-		return c.SendString("Failed to create AWS session")
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	return c.SendString(urlStr)
+	// Redirect
+	return c.Redirect(urlStr)
 }
