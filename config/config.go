@@ -7,11 +7,14 @@ import (
 	"github.com/joho/godotenv"
 )
 
+func init() {
+	godotenv.Load(".env")
+}
+
 func Config(key string) string {
-	err := godotenv.Load(".env")
 	value := os.Getenv(key)
 
-	if err != nil && value == "" {
+	if value == "" {
 		log.Fatalf("Error loading the environment variable %s", key)
 	}
 

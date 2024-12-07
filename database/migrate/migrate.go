@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/TempFileLink/TempFileLink-BE/database"
+	"github.com/TempFileLink/TempFileLink-BE/models"
 )
 
 func init() {
@@ -11,7 +12,7 @@ func init() {
 }
 
 func main() {
-	database.DB.AutoMigrate()
+	database.DB.AutoMigrate(&models.Model{}, &models.User{})
 
 	log.Println("Migration completed")
 }
