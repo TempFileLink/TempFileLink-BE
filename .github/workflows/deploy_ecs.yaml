@@ -108,6 +108,7 @@ jobs:
             DB_PORT=${{ env.DB_PORT }}
             PORT=${{ env.PORT }}
             FRONTEND_URL=${{ env.FRONTEND_URL }}
+            JWT_SECRET="${{ secrets.JWT_SECRET }}"
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@df9643053eda01f169e64a0e60233aacca83799a

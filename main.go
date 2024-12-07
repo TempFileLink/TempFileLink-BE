@@ -5,6 +5,7 @@ import (
 
 	"github.com/TempFileLink/TempFileLink-BE/config"
 	"github.com/TempFileLink/TempFileLink-BE/database"
+	"github.com/TempFileLink/TempFileLink-BE/middlewares"
 	"github.com/TempFileLink/TempFileLink-BE/routers"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -17,7 +18,10 @@ func init() {
 }
 
 func main() {
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		ErrorHandler: middlewares.ErrorHandler,
+	})
+
 	api := app.Group("/api")
 	apiV1 := api.Group("/v1")
 
