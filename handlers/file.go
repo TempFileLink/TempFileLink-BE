@@ -64,9 +64,10 @@ func uploadObject(uploader *s3manager.Uploader, prefix string, fileHeader *multi
 	filePath := fmt.Sprintf("%s%s", prefix, fileHeader.Filename)
 
 	_, err = uploader.Upload(&s3manager.UploadInput{
-		Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
-		Key:    aws.String(filePath),
-		Body:   file,
+		Bucket:  aws.String(config.Config("AWS_BUCKET_NAME")),
+		Key:     aws.String(filePath),
+		Body:    file,
+		Tagging: aws.String("expiry=true"),
 	})
 
 	return err
@@ -253,4 +254,46 @@ func GetFile(c *fiber.Ctx) error {
 	}
 
 	return c.Redirect(urlStr)
+}
+
+func DeleteFile(c *fiber.Ctx) error {
+	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
+
+	fileName := c.Params("fileId")
+	if fileName == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("File ID is missing")
+	}
+
+	s3Key := fmt.Sprintf("%s%s", prefix, fileName)
+
+	// Check file metadata dan ownership
+	var metadata models.FileMetadata
+	if err := database.DB.Where("s3_key = ?", s3Key).First(&metadata).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).SendString("File not found")
+	}
+
+	// Delete dari S3
+	sess, err := newSession()
+	if err != nil {
+		return c.SendStatus(fiber.StatusInternalServerError)
+	}
+
+	s3Client := s3.New(sess)
+	_, err = s3Client.DeleteObject(&s3.DeleteObjectInput{
+		Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
+		Key:    aws.String(s3Key),
+	})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to delete file from S3")
+	}
+
+	// Delete dari database
+	if err := database.DB.Delete(&metadata).Error; err != nil {
+		log.Printf("Failed to delete metadata for file %s: %v", s3Key, err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to delete file metadata")
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "File deleted successfully",
+	})
 }
