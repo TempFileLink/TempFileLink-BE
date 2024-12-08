@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"fmt"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
+	"log"
 	"mime/multipart"
 	"time"
 
@@ -143,6 +146,8 @@ func GetListFile(c *fiber.Ctx) error {
 
 func UploadFile(c *fiber.Ctx) error {
 	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
+	claims := c.Locals("user").(*jwt.Token).Claims.(jwt.MapClaims)
+	userID := claims["id"].(string)
 
 	sess, err := newSession()
 	if err != nil {
@@ -151,57 +156,101 @@ func UploadFile(c *fiber.Ctx) error {
 
 	uploader := s3manager.NewUploader(sess)
 	file, err := c.FormFile("file")
-
-	err = uploadObject(uploader, prefix, file)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString("Upload file failed")
+		return c.Status(fiber.StatusBadRequest).SendString("File upload failed")
 	}
 
-	/* Handle buat bikin password ke DB */
-	/*
-		Nama file bisa diambil dari "file.Filename"
+	// Get password if provided
+	password := c.FormValue("password")
+	var hashedPassword string
+	isPassword := false
 
-		Ide awalnya (boleh diganti kalau ada yang lebih cocok)
-		DB isinya:
-		fileID -> formatnya <USER-ID>/<FILENAME>
-		isPassword true/false -> tergantung pake atau enggak
-		password -> hashed password (bisa nyontek dari user.go)
-	*/
-	// Isi disini (kalau udah hapus aja)
+	if password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).SendString("Password processing failed")
+		}
+		hashedPassword = string(hash)
+		isPassword = true
+	}
 
-	// Return berhasil
-	return c.SendString("File uploaded")
+	// Upload to S3
+	s3Key := fmt.Sprintf("%s%s", prefix, file.Filename)
+	err = uploadObject(uploader, prefix, file)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("Upload to S3 failed")
+	}
+
+	// Save metadata to DB
+	metadata := models.FileMetadata{
+		UserID:     uuid.MustParse(userID),
+		Filename:   file.Filename,
+		S3Key:      s3Key,
+		IsPassword: isPassword,
+		Password:   hashedPassword,
+		ExpiryTime: time.Now().Add(24 * time.Hour), // Default 24 jam
+	}
+
+	if err := database.DB.Create(&metadata).Error; err != nil {
+		// Rollback S3 upload if DB fails
+		s3Client := s3.New(sess)
+		_, deleteErr := s3Client.DeleteObject(&s3.DeleteObjectInput{
+			Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
+			Key:    aws.String(s3Key),
+		})
+		if deleteErr != nil {
+			log.Printf("Failed to cleanup S3 after DB error: %v", deleteErr)
+		}
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to save file metadata")
+	}
+
+	return c.JSON(fiber.Map{
+		"message":    "File uploaded successfully",
+		"fileId":     metadata.ID,
+		"expiryTime": metadata.ExpiryTime,
+	})
 }
 
 func GetFile(c *fiber.Ctx) error {
 	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
-
-	sess, err := newSession()
-	if err != nil {
-		return c.SendStatus(fiber.StatusInternalServerError)
-	}
 
 	fileName := c.Params("fileId")
 	if fileName == "" {
 		return c.Status(fiber.StatusBadRequest).SendString("File ID is missing")
 	}
 
+	s3Key := fmt.Sprintf("%s%s", prefix, fileName)
+
+	// Check file metadata
+	var metadata models.FileMetadata
+	if err := database.DB.Where("s3_key = ?", s3Key).First(&metadata).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).SendString("File not found")
+	}
+
+	// Check if file is expired
+	if time.Now().After(metadata.ExpiryTime) {
+		return c.Status(fiber.StatusGone).SendString("File has expired")
+	}
+
+	// Check password if required
+	if metadata.IsPassword {
+		password := c.FormValue("password")
+		if err := bcrypt.CompareHashAndPassword([]byte(metadata.Password), []byte(password)); err != nil {
+			return c.Status(fiber.StatusUnauthorized).SendString("Invalid password")
+		}
+	}
+
+	// Generate presigned URL
+	sess, err := newSession()
+	if err != nil {
+		return c.SendStatus(fiber.StatusInternalServerError)
+	}
+
 	s3Client := s3.New(sess)
-
-	/* Handle buat cek password, klo benar baru proses */
-	/*
-		Ide awalnya (boleh diganti kalau ada yang lebih cocok)
-		Cek ke DB dari <USER-ID>/<fileID>
-		<fileID> sama aja dengan <FILENAME>
-	*/
-	// Isi disini (kalau udah hapus aja)
-
-	// Untuk presign + redirect URL
 	urlStr, err := presignUrl(s3Client, prefix, fileName)
 	if err != nil {
 		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	// Redirect
 	return c.Redirect(urlStr)
 }
