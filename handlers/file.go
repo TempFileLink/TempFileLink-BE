@@ -2,11 +2,12 @@ package handlers
 
 import (
 	"fmt"
-	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 	"log"
 	"mime/multipart"
 	"time"
+
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/TempFileLink/TempFileLink-BE/config"
 	"github.com/TempFileLink/TempFileLink-BE/database"
@@ -73,15 +74,13 @@ func uploadObject(uploader *s3manager.Uploader, prefix string, fileHeader *multi
 	return err
 }
 
-func presignUrl(client *s3.S3, prefix string, name string) (string, error) {
-	fileName := fmt.Sprintf("%s%s", prefix, name)
-
+func presignUrl(client *s3.S3, fileName string) (string, error) {
 	req, _ := client.GetObjectRequest(&s3.GetObjectInput{
 		Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
 		Key:    aws.String(fileName),
 	})
 
-	urlStr, err := req.Presign(5 * time.Minute)
+	urlStr, err := req.Presign(15 * time.Minute)
 	if err != nil {
 		return "", err
 	}
@@ -147,8 +146,6 @@ func GetListFile(c *fiber.Ctx) error {
 
 func UploadFile(c *fiber.Ctx) error {
 	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
-	claims := c.Locals("user").(*jwt.Token).Claims.(jwt.MapClaims)
-	userID := claims["id"].(string)
 
 	sess, err := newSession()
 	if err != nil {
@@ -193,7 +190,7 @@ func UploadFile(c *fiber.Ctx) error {
 
 	// Save metadata to DB
 	metadata := models.FileMetadata{
-		UserID:     uuid.MustParse(userID),
+		UserID:     uuid.MustParse(prefix[0 : len(prefix)-1]),
 		Filename:   file.Filename,
 		S3Key:      s3Key,
 		IsPassword: isPassword,
@@ -224,20 +221,16 @@ func UploadFile(c *fiber.Ctx) error {
 }
 
 func GetFile(c *fiber.Ctx) error {
-	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
-
-	fileName := c.Params("fileId")
-	if fileName == "" {
+	fileId := c.Params("fileId")
+	if fileId == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "File ID is missing",
 		})
 	}
 
-	s3Key := fmt.Sprintf("%s%s", prefix, fileName)
-
 	// Check file metadata
 	var metadata models.FileMetadata
-	if err := database.DB.Where("s3_key = ?", s3Key).First(&metadata).Error; err != nil {
+	if err := database.DB.Where("id = ?", fileId).First(&metadata).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "File not found",
 		})
@@ -269,7 +262,7 @@ func GetFile(c *fiber.Ctx) error {
 	}
 
 	s3Client := s3.New(sess)
-	urlStr, err := presignUrl(s3Client, prefix, fileName)
+	urlStr, err := presignUrl(s3Client, metadata.S3Key)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to generate download URL",
