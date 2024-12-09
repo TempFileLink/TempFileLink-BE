@@ -107,7 +107,7 @@ For Handling API call in routers/file.go
 */
 
 func FileMessage(c *fiber.Ctx) error {
-	return c.SendString("File")
+	return c.SendString("file")
 }
 
 func GetListFile(c *fiber.Ctx) error {
@@ -116,29 +116,22 @@ func GetListFile(c *fiber.Ctx) error {
 		{
 			"data": [
 				{
-					"name": "820d074d-a33c-4b03-b165-eb9c559bc621/file2.txt",
-					"size": 49
+					"fileId": "23b720d4-129c-44ba-98dc-50d2d073b996",
+					"name": "all.jpg"
 				}
 			]
 		}
 	*/
 	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
 
-	sess, err := newSession()
-	if err != nil {
-		return c.SendStatus(fiber.StatusInternalServerError)
-	}
-
-	s3Client := s3.New(sess)
-	objects, err := listObjects(s3Client, prefix)
-	if err != nil {
-		return c.SendStatus(fiber.StatusInternalServerError)
-	}
+	// Cek file di DB
+	var users []models.FileMetadata
+	database.DB.Where("user_id = ?", prefix[0:len(prefix)-1]).Find(&users)
 
 	// Change to Slice
 	var response []fiber.Map
-	for _, object := range objects.Contents {
-		response = append(response, fiber.Map{"name": *object.Key, "size": *object.Size})
+	for _, object := range users {
+		response = append(response, fiber.Map{"name": *&object.Filename, "fileId": object.ID})
 	}
 
 	return c.JSON(fiber.Map{"data": response})
@@ -297,19 +290,16 @@ func InfoFile(c *fiber.Ctx) error {
 
 func DeleteFile(c *fiber.Ctx) error {
 	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
-
-	fileName := c.Params("fileId")
-	if fileName == "" {
+	fileId := c.Params("fileId")
+	if fileId == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "File ID is missing",
 		})
 	}
 
-	s3Key := fmt.Sprintf("%s%s", prefix, fileName)
-
 	// Check file metadata dan ownership
 	var metadata models.FileMetadata
-	if err := database.DB.Where("s3_key = ?", s3Key).First(&metadata).Error; err != nil {
+	if err := database.DB.Where("id = ?", fileId).Where("user_id = ?", prefix[0:len(prefix)-1]).First(&metadata).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "File not found",
 		})
@@ -326,7 +316,7 @@ func DeleteFile(c *fiber.Ctx) error {
 	s3Client := s3.New(sess)
 	_, err = s3Client.DeleteObject(&s3.DeleteObjectInput{
 		Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
-		Key:    aws.String(s3Key),
+		Key:    aws.String(metadata.S3Key),
 	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -336,7 +326,7 @@ func DeleteFile(c *fiber.Ctx) error {
 
 	// Delete dari database
 	if err := database.DB.Delete(&metadata).Error; err != nil {
-		log.Printf("Failed to delete metadata for file %s: %v", s3Key, err)
+		log.Printf("Failed to delete metadata for file %s: %v", metadata.S3Key, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to delete file metadata",
 		})
