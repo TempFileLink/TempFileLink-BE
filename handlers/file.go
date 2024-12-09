@@ -228,7 +228,9 @@ func GetFile(c *fiber.Ctx) error {
 
 	fileName := c.Params("fileId")
 	if fileName == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("File ID is missing")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "File ID is missing",
+		})
 	}
 
 	s3Key := fmt.Sprintf("%s%s", prefix, fileName)
@@ -236,32 +238,42 @@ func GetFile(c *fiber.Ctx) error {
 	// Check file metadata
 	var metadata models.FileMetadata
 	if err := database.DB.Where("s3_key = ?", s3Key).First(&metadata).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).SendString("File not found")
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "File not found",
+		})
 	}
 
 	// Check if file is expired
 	if time.Now().After(metadata.ExpiryTime) {
-		return c.Status(fiber.StatusGone).SendString("File has expired")
+		return c.Status(fiber.StatusGone).JSON(fiber.Map{
+			"error": "File has expired",
+		})
 	}
 
 	// Check password if required
 	if metadata.IsPassword {
 		password := c.FormValue("password")
 		if err := bcrypt.CompareHashAndPassword([]byte(metadata.Password), []byte(password)); err != nil {
-			return c.Status(fiber.StatusUnauthorized).SendString("Invalid password")
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Invalid password",
+			})
 		}
 	}
 
 	// Generate presigned URL
 	sess, err := newSession()
 	if err != nil {
-		return c.SendStatus(fiber.StatusInternalServerError)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Internal server error",
+		})
 	}
 
 	s3Client := s3.New(sess)
 	urlStr, err := presignUrl(s3Client, prefix, fileName)
 	if err != nil {
-		return c.SendStatus(fiber.StatusInternalServerError)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to generate download URL",
+		})
 	}
 
 	return c.Redirect(urlStr)
@@ -272,7 +284,9 @@ func DeleteFile(c *fiber.Ctx) error {
 
 	fileName := c.Params("fileId")
 	if fileName == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("File ID is missing")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "File ID is missing",
+		})
 	}
 
 	s3Key := fmt.Sprintf("%s%s", prefix, fileName)
@@ -280,13 +294,17 @@ func DeleteFile(c *fiber.Ctx) error {
 	// Check file metadata dan ownership
 	var metadata models.FileMetadata
 	if err := database.DB.Where("s3_key = ?", s3Key).First(&metadata).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).SendString("File not found")
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "File not found",
+		})
 	}
 
 	// Delete dari S3
 	sess, err := newSession()
 	if err != nil {
-		return c.SendStatus(fiber.StatusInternalServerError)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Internal server error",
+		})
 	}
 
 	s3Client := s3.New(sess)
@@ -295,13 +313,17 @@ func DeleteFile(c *fiber.Ctx) error {
 		Key:    aws.String(s3Key),
 	})
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to delete file from S3")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to delete file from S3",
+		})
 	}
 
 	// Delete dari database
 	if err := database.DB.Delete(&metadata).Error; err != nil {
 		log.Printf("Failed to delete metadata for file %s: %v", s3Key, err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to delete file metadata")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to delete file metadata",
+		})
 	}
 
 	return c.JSON(fiber.Map{
