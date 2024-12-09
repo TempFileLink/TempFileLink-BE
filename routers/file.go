@@ -24,5 +24,4 @@ func setupFileRoutes(api fiber.Router) {
 	fileApi.Get("/get/:fileId", middlewares.JWTWare, handlers.GetFile)
 	fileApi.Post("/upload", middlewares.JWTWare, handlers.UploadFile)
 	fileApi.Delete("/delete/:fileId", middlewares.JWTWare, handlers.DeleteFile)
-	fileApi.Put("/extend/:fileId", middlewares.JWTWare, handlers.ExtendFileExpiry)
 }
