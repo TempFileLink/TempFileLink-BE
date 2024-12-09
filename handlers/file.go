@@ -272,6 +272,29 @@ func GetFile(c *fiber.Ctx) error {
 	return c.Redirect(urlStr)
 }
 
+func InfoFile(c *fiber.Ctx) error {
+	fileId := c.Params("fileId")
+	if fileId == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "File ID is missing",
+		})
+	}
+
+	// Check file metadata
+	var metadata models.FileMetadata
+	if err := database.DB.Where("id = ?", fileId).First(&metadata).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "File not found",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"filename":   metadata.Filename,
+		"fileId":     metadata.ID,
+		"isPassword": metadata.IsPassword,
+	})
+}
+
 func DeleteFile(c *fiber.Ctx) error {
 	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
 
