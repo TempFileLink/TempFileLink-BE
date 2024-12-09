@@ -152,13 +152,17 @@ func UploadFile(c *fiber.Ctx) error {
 
 	sess, err := newSession()
 	if err != nil {
-		return c.SendStatus(fiber.StatusInternalServerError)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Internal server error",
+		})
 	}
 
 	uploader := s3manager.NewUploader(sess)
 	file, err := c.FormFile("file")
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString("File upload failed")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "File upload failed",
+		})
 	}
 
 	// Get password if provided
@@ -169,7 +173,9 @@ func UploadFile(c *fiber.Ctx) error {
 	if password != "" {
 		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).SendString("Password processing failed")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Password processing failed",
+			})
 		}
 		hashedPassword = string(hash)
 		isPassword = true
@@ -179,7 +185,10 @@ func UploadFile(c *fiber.Ctx) error {
 	s3Key := fmt.Sprintf("%s%s", prefix, file.Filename)
 	err = uploadObject(uploader, prefix, file)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString("Upload to S3 failed")
+		log.Printf("Failed to upload file %s to S3: %v", s3Key, err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Upload to S3 failed",
+		})
 	}
 
 	// Save metadata to DB
@@ -202,7 +211,9 @@ func UploadFile(c *fiber.Ctx) error {
 		if deleteErr != nil {
 			log.Printf("Failed to cleanup S3 after DB error: %v", deleteErr)
 		}
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to save file metadata")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to save file metadata",
+		})
 	}
 
 	return c.JSON(fiber.Map{
@@ -295,5 +306,68 @@ func DeleteFile(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"message": "File deleted successfully",
+	})
+}
+
+func ExtendFileExpiry(c *fiber.Ctx) error {
+	prefix := getUserInfo(c.Locals("user").(*jwt.Token))
+
+	fileName := c.Params("fileId")
+	if fileName == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("File ID is missing")
+	}
+
+	// Parse jumlah jam untuk extend
+	hours := c.QueryInt("hours", 24)
+	if hours <= 0 {
+		return c.Status(fiber.StatusBadRequest).SendString("Invalid hours value")
+	}
+
+	s3Key := fmt.Sprintf("%s%s", prefix, fileName)
+
+	// Check file metadata dan ownership
+	var metadata models.FileMetadata
+	if err := database.DB.Where("s3_key = ?", s3Key).First(&metadata).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).SendString("File not found")
+	}
+
+	// Check jika file sudah expired
+	if time.Now().After(metadata.ExpiryTime) {
+		return c.Status(fiber.StatusBadRequest).SendString("File has already expired")
+	}
+
+	// Get AWS session
+	sess, err := newSession()
+	if err != nil {
+		return c.SendStatus(fiber.StatusInternalServerError)
+	}
+	s3Client := s3.New(sess)
+
+	// Update tag di S3
+	_, err = s3Client.PutObjectTagging(&s3.PutObjectTaggingInput{
+		Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
+		Key:    aws.String(s3Key),
+		Tagging: &s3.Tagging{
+			TagSet: []*s3.Tag{
+				{
+					Key:   aws.String("expiry"),
+					Value: aws.String("true"), // Reset tag untuk trigger lifecycle rule baru
+				},
+			},
+		},
+	})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to update S3 object tags")
+	}
+
+	// Extend expiry time di database
+	metadata.ExpiryTime = time.Now().Add(time.Duration(hours) * time.Hour)
+	if err := database.DB.Save(&metadata).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to extend file expiry")
+	}
+
+	return c.JSON(fiber.Map{
+		"message":       "File expiry extended successfully",
+		"newExpiryTime": metadata.ExpiryTime,
 	})
 }
