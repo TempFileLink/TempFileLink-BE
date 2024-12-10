@@ -9,4 +9,5 @@ func setupEmailRoutes(api fiber.Router) {
 	emailApi := api.Group("/email")
 
 	emailApi.Get("/", handlers.EmailMessage)
+	emailApi.Post("/send", handlers.SendEmail)
 }
