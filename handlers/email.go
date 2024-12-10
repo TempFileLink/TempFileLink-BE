@@ -22,6 +22,29 @@ func SendEmail(c *fiber.Ctx) error {
 		})
 	}
 
+	sender_email := c.FormValue("sender_email")
+	if sender_email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Sender email is missing",
+		})
+	}
+
+	// sender_password must be linked to sender_email google account
+	// via app passwords (different from gmail password)
+	sender_password := c.FormValue("sender_password")
+	if sender_password == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Sender password is missing",
+		})
+	}
+
+	receiver_email := c.FormValue("receiver_email")
+	if receiver_email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Receiver email is missing",
+		})
+	}
+
 	message := c.FormValue("message") // assume injection-free
 	body_message := "</b></p>"
 	if message != "" {
@@ -29,12 +52,6 @@ func SendEmail(c *fiber.Ctx) error {
 			"with the following message:</b></p><p>%s</p>", message,
 		)
 	}
-
-	// sender_password must be linked to sender_email google account
-	// via app passwords (different from gmail password)
-	sender_password := c.FormValue("sender_password")
-	sender_email := c.FormValue("sender_email")
-	receiver_email := c.FormValue("receiver_email")
 
 	subject := "TempFile.Link - Shared Link"
 
