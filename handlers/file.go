@@ -355,7 +355,7 @@ func DeleteFile(c *fiber.Ctx) error {
 	}
 
 	// Delete dari database
-	if err := database.DB.Delete(&metadata).Error; err != nil {
+	if err := database.DB.Unscoped().Delete(&metadata).Error; err != nil {
 		log.Printf("Failed to delete metadata for file %s: %v", metadata.S3Key, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to delete file metadata",
