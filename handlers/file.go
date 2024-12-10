@@ -251,7 +251,7 @@ func GetFile(c *fiber.Ctx) error {
 
 	// Check password if required
 	if metadata.IsPassword {
-		password := c.FormValue("password")
+		password := c.Query("password")
 		if err := bcrypt.CompareHashAndPassword([]byte(metadata.Password), []byte(password)); err != nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Invalid password",
@@ -275,7 +275,7 @@ func GetFile(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.Redirect(urlStr)
+	return c.JSON(fiber.Map{"value": urlStr})
 }
 
 func InfoFile(c *fiber.Ctx) error {
