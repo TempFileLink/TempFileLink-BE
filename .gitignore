@@ -26,3 +26,9 @@ go.work.sum
 
 # Tmp files
 tmp/
+
+# Jetbrains IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
