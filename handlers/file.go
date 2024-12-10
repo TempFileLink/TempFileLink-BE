@@ -55,6 +55,19 @@ func listObjects(client *s3.S3, prefix string) (*s3.ListObjectsV2Output, error) 
 	return res, nil
 }
 
+func getObjectsData(client *s3.S3, filename string) (*s3.HeadObjectOutput, error) {
+	res, err := client.HeadObject(&s3.HeadObjectInput{
+		Bucket: aws.String(config.Config("AWS_BUCKET_NAME")),
+		Key:    aws.String(filename),
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}
+
 func uploadObject(uploader *s3manager.Uploader, prefix string, fileHeader *multipart.FileHeader) error {
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -238,7 +251,7 @@ func GetFile(c *fiber.Ctx) error {
 
 	// Check password if required
 	if metadata.IsPassword {
-		password := c.FormValue("password")
+		password := c.Query("password")
 		if err := bcrypt.CompareHashAndPassword([]byte(metadata.Password), []byte(password)); err != nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Invalid password",
@@ -262,7 +275,7 @@ func GetFile(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.Redirect(urlStr)
+	return c.JSON(fiber.Map{"value": urlStr})
 }
 
 func InfoFile(c *fiber.Ctx) error {
@@ -281,10 +294,27 @@ func InfoFile(c *fiber.Ctx) error {
 		})
 	}
 
+	// Get Additional Info
+	sess, err := newSession()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Internal server error",
+		})
+	}
+
+	s3Client := s3.New(sess)
+	result, err := getObjectsData(s3Client, metadata.S3Key)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "File not found",
+		})
+	}
+
 	return c.JSON(fiber.Map{
-		"filename":   metadata.Filename,
-		"fileId":     metadata.ID,
-		"isPassword": metadata.IsPassword,
+		"filename":    metadata.Filename,
+		"fileId":      metadata.ID,
+		"isPassword":  metadata.IsPassword,
+		"contentSize": aws.Int64Value(result.ContentLength),
 	})
 }
 
@@ -325,7 +355,7 @@ func DeleteFile(c *fiber.Ctx) error {
 	}
 
 	// Delete dari database
-	if err := database.DB.Delete(&metadata).Error; err != nil {
+	if err := database.DB.Unscoped().Delete(&metadata).Error; err != nil {
 		log.Printf("Failed to delete metadata for file %s: %v", metadata.S3Key, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to delete file metadata",
